@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentenv-sandbox-index"
+version = "0.1.0"
+description = "The AgentEnv Sandbox Index harness: measure and score sandbox providers on agent workloads with `agent-env bench sandboxes`"
+readme = "README.md"
+requires-python = ">=3.11.4"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "agentenv-framework>=0.9.1398",
+    "click>=8.1",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.16,<0.17"]
+
+[project.urls]
+Source = "https://github.com/earakely-scale/agentenv-sandbox-index-plugin"
+
+[project.entry-points."agent_env.cli_plugins"]
+bench = "agentenv_sandbox_index.cli:bench"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentenv_sandbox_index"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
