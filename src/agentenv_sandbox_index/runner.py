@@ -4,19 +4,24 @@ nothing is retried."""
 
 import asyncio
 import random
+import shlex
 import time
+import urllib.request
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from agent_env.providers.sandbox_providers import SANDBOX_MODE_VM, Sandbox, SandboxProvider, build_sandbox_provider
+from agent_env.providers.sandbox_providers import (
+    SANDBOX_MODE_VM,
+    Sandbox,
+    SandboxProvider,
+    VmSandbox,
+    build_sandbox_provider,
+)
 
 from . import methodology, rows
 from .rows import Row, Step
-
-# How many S1 samples each provider takes an hour.
-S1_PER_HOUR = 10
 
 
 class Sample:
@@ -45,6 +50,14 @@ class Sample:
         finally:
             s.end = self._now()
 
+    async def command(self, name: str, sandbox: Sandbox, *argv: str) -> str:
+        """Run a command as a step; a non-zero exit fails the step."""
+        code, out, err = await self.step(name, sandbox.exec_with_output(*argv), methodology.STEP_TIMEOUT_S)
+        if code != 0:
+            self.row.steps[name].error = f"exit {code}: {err.strip()[:400]}"
+            raise RuntimeError(self.row.steps[name].error)
+        return out
+
     def fail(self, error: BaseException) -> None:
         name = next((k for k, s in self.row.steps.items() if s.error), None)
         self.row.outcome, self.row.failed_step = "failed", name
@@ -64,7 +77,7 @@ async def create(provider: SandboxProvider, run_id: str, image: str | None) -> S
             cpu=methodology.CPU, memory=methodology.MEMORY_MB, setup_for_gateway=False, attribution=attribution(run_id)
         )
     if image is None:
-        raise ValueError(f"{type(provider).__name__} runs containers only, so S1 needs --image, the benchmark image")
+        raise ValueError(f"{type(provider).__name__} runs containers only, so it needs --image, the benchmark image")
     return await provider.create_sandbox(
         image_name=image,
         port=8080,
@@ -82,10 +95,7 @@ async def s1(provider: SandboxProvider, name: str, run_id: str, image: str | Non
     sandbox = None
     try:
         sandbox = await sample.step("create", create(provider, run_id, image), methodology.CREATE_TIMEOUT_S)
-        code, _, err = await sample.step("first_command", sandbox.exec_with_output("true"), methodology.STEP_TIMEOUT_S)
-        if code != 0:
-            sample.row.steps["first_command"].error = f"exit {code}: {err.strip()[:400]}"
-            raise RuntimeError(sample.row.steps["first_command"].error)
+        await sample.command("first_command", sandbox, "true")
         sample.row.value = round(sample.row.steps["first_command"].end - sample.row.steps["create"].start, 4)
     except Exception as e:
         sample.fail(e)
@@ -100,7 +110,60 @@ async def s1(provider: SandboxProvider, name: str, run_id: str, image: str | Non
     return sample.row
 
 
-MEASURES: dict[str, Callable[[SandboxProvider, str, str, str | None], Awaitable[Row]]] = {"S1": s1}
+def client_fetch(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return response.status < 400
+    except Exception:
+        return False
+
+
+FETCH = "curl -fsS --max-time 60 -o /dev/null {url} || wget -q -T 60 -O /dev/null {url}"
+
+
+async def r1(provider: SandboxProvider, name: str, run_id: str, image: str | None) -> Row:
+    """R1: one probe, create, a command, a file written and read back, a network fetch and teardown, any failure or
+    any step over its timeout failing it. A failed fetch the client's own fetch of the same URL also failed is
+    discarded: the fault was on our side."""
+    sample = Sample(run_id, name, "R1")
+    sandbox, control = None, None
+    try:
+        sandbox = await sample.step("create", create(provider, run_id, image), methodology.CREATE_TIMEOUT_S)
+        await sample.command("exec", sandbox, "true")
+        token = sample.row.sample_id
+        # A bare VM has no agent container to write into, so its file goes on the VM host, through the same transfer.
+        write = (
+            sandbox.write_host_file(token.encode(), methodology.PROBE_PATH)
+            if isinstance(sandbox, VmSandbox)
+            else sandbox.write_file_from_text(token, methodology.PROBE_PATH)
+        )
+        await sample.step("file_write", write, methodology.STEP_TIMEOUT_S)
+        if (await sample.command("file_read", sandbox, "cat", methodology.PROBE_PATH)).strip() != token:
+            sample.row.steps["file_read"].error = "read back something other than what was written"
+            raise RuntimeError(sample.row.steps["file_read"].error)
+        control = asyncio.create_task(asyncio.to_thread(client_fetch, methodology.PROBE_URL))
+        await sample.command("network", sandbox, "sh", "-c", FETCH.format(url=shlex.quote(methodology.PROBE_URL)))
+        doomed, sandbox = sandbox, None
+        await sample.step("teardown", provider.terminate_sandbox(doomed.sandbox_id), methodology.STEP_TIMEOUT_S)
+        sample.row.value = sample.row.steps["teardown"].end
+    except Exception as e:
+        sample.fail(e)
+        if sample.row.failed_step == "network" and control is not None and not await control:
+            sample.row.outcome = "discarded"
+    finally:
+        if control is not None and not control.done():
+            control.cancel()
+        if sandbox is not None:
+            try:
+                await sample.step(
+                    "teardown", provider.terminate_sandbox(sandbox.sandbox_id), methodology.STEP_TIMEOUT_S
+                )
+            except Exception:
+                pass  # the probe has already failed; the teardown step records this too
+    return sample.row
+
+
+MEASURES: dict[str, Callable[[SandboxProvider, str, str, str | None], Awaitable[Row]]] = {"S1": s1, "R1": r1}
 
 
 async def run(
@@ -113,8 +176,8 @@ async def run(
     image: str | None,
     log: Callable[[Row], None] = lambda _: None,
 ) -> str:
-    """Measure `metrics` on `providers` into `run_dir`: `samples` back to back per provider, or else the methodology's
-    hourly cadence for `days`, providers in a fresh random order each hour. Returns the run id."""
+    """Measure `metrics` on `providers` into `run_dir`: `samples` back to back per provider and metric, or else each
+    metric's cadence for `days`, every provider and metric on its own loop. Returns the run id."""
     run_dir.mkdir(parents=True, exist_ok=True)
     run_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{uuid.uuid4().hex[:6]}"
     rows.write_manifest(run_dir, run_id, providers, metrics)
@@ -125,21 +188,24 @@ async def run(
         rows.append(run_dir, row)
         log(row)
 
+    async def cadence(name: str, metric: str, end: float) -> None:
+        period, count = methodology.CADENCE[metric]
+        due = time.monotonic() + random.uniform(0, period)
+        while due < end:
+            await asyncio.sleep(max(0.0, due - time.monotonic()))
+            for _ in range(count):
+                await measure(name, metric)
+            due += period
+
     try:
         if samples is not None:
             for name in providers:
                 for metric in metrics:
                     for _ in range(samples):
                         await measure(name, metric)
-            return run_id
-        end = time.monotonic() + days * 86400
-        while time.monotonic() < end:
-            hour = time.monotonic()
-            for name in random.sample(providers, len(providers)):
-                for metric in metrics:
-                    for _ in range(S1_PER_HOUR):
-                        await measure(name, metric)
-            await asyncio.sleep(max(0.0, min(3600 - (time.monotonic() - hour), end - time.monotonic())))
+        else:
+            end = time.monotonic() + days * 86400
+            await asyncio.gather(*(cadence(name, metric, end) for name in providers for metric in metrics))
         return run_id
     finally:
         for provider in built.values():

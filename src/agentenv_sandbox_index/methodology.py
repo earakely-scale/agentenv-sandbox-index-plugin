@@ -83,6 +83,15 @@ PARTS: dict[SubIndex, tuple[tuple[str, str, float], ...]] = {
 RELIABILITY_FLOOR = 99.0
 RELIABILITY_CAP = 40.0
 
+# How often each metric samples a provider in the scored run: (period in seconds, samples each period). Each
+# provider's loop for a metric starts at a random offset inside the first period.
+CADENCE: dict[str, tuple[float, int]] = {"S1": (3600, 10), "R1": (300, 1)}
+
+# R1's network step fetches this from inside the sandbox; the client fetches it too, at the same moment, so a fault on
+# the client's side discards the probe instead of failing the provider. A tiny response on a CDN built for checks.
+PROBE_URL = "https://www.gstatic.com/generate_204"
+PROBE_PATH = "/tmp/agentenv-sandbox-index-probe"
+
 STRESS_DRAWS = 10_000
 STRESS_ALPHA = 20.0
 BOOTSTRAP_RESAMPLES = 10_000

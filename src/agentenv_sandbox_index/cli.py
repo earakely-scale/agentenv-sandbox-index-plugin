@@ -10,7 +10,7 @@ import click
 from . import methodology
 from .rows import Row, read
 from .runner import MEASURES, run
-from .summary import summarize
+from .summary import Statistic, summarize
 
 
 @click.group()
@@ -26,6 +26,10 @@ def _providers(value: str) -> list[str]:
 def _show(row: Row) -> None:
     if row.outcome == "ok":
         click.echo(f"{row.provider:<12} {row.metric}  {row.value:8.3f} s")
+    elif row.outcome == "discarded":
+        click.echo(
+            f"{row.provider:<12} {row.metric}  discarded, the client's own fetch failed too: {row.error}", err=True
+        )
     else:
         click.echo(f"{row.provider:<12} {row.metric}  failed at {row.failed_step}: {row.error}", err=True)
 
@@ -66,7 +70,10 @@ def score(runs: tuple[Path, ...], resamples: int, as_json: bool):
         )
         return
     for s in summaries:
-        stats = "  ".join(
-            f"{x.name} {x.value:.3f} s [{x.lo:.3f}, {x.hi:.3f}] by {x.resampled_by}" for x in s.statistics
-        )
-        click.echo(f"{s.provider:<12} {s.metric}  n={s.samples} failed={s.failed}  {stats}")
+        stats = "  ".join(_stat(x) for x in s.statistics)
+        click.echo(f"{s.provider:<12} {s.metric}  n={s.samples} failed={s.failed} discarded={s.discarded}  {stats}")
+
+
+def _stat(x: Statistic) -> str:
+    unit = "%" if x.name.startswith("r") else " s"
+    return f"{x.name} {x.value:.3f}{unit} [{x.lo:.3f}, {x.hi:.3f}] by {x.resampled_by}"

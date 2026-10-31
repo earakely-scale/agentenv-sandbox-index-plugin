@@ -5,8 +5,8 @@ on real agent workloads, with every raw number published. It is an [AgentEnv Fra
 plugin that adds `agent-env bench`. It drives every provider through agent-env's sandbox-provider interface, so each one
 runs the same code.
 
-**Status: pre-release.** Methodology `1.0-draft`. S1 (create to first command) is measured; the other metrics land
-one by one, each prototyped on `modal_vm` first. Reference points are calibrated by a 2-day pilot before v1.0 freezes.
+**Status: pre-release.** Methodology `1.0-draft`. S1 (create to first command) and R1 (probe success) are measured;
+the other metrics land one by one, each prototyped on `modal_vm` first. Reference points are calibrated by a 2-day pilot before v1.0 freezes.
 
 ## Install
 
@@ -24,7 +24,7 @@ docs describe.
 # Prototype: 20 S1 samples on modal_vm, back to back
 agent-env bench sandboxes --providers modal_vm --metrics S1 --samples 20 --out runs/modal_vm-s1
 
-# The scored cadence on every ranked provider for 7 days
+# The scored cadence on every ranked provider for 7 days: S1 10 times an hour, an R1 probe every 5 minutes
 agent-env bench sandboxes --providers all --days 7 --out runs/week
 
 # Statistics with bootstrap 95% intervals
@@ -68,6 +68,13 @@ distribution's version) and `rows.jsonl`, one sample per line:
 
 Step times are seconds from the sample's start on the client's monotonic clock. A failed sample names the step and
 whether it timed out or errored, with the provider's error text.
+
+An R1 probe creates a sandbox, runs a command, writes a file and reads it back, fetches a URL from inside the sandbox
+and tears it down. If the fetch fails while the client's own fetch of the same URL, made at the same moment, fails too,
+the fault was on our side: the probe is `discarded`, counted and published, but scored for no one.
+
+`agent-env bench score` gives each statistic a 95% interval from a bootstrap over hour blocks; a run inside one hour
+resamples by sample, and a success rate with no failures takes a Wilson interval, so it never claims zero width.
 
 ## Develop
 

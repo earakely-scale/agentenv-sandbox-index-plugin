@@ -35,7 +35,8 @@ class Row:
     started_at: str
     steps: dict[str, Step] = field(default_factory=dict)
     value: float | None = None
-    outcome: Literal["ok", "failed"] = "ok"
+    # "discarded": the fault was on the client's side (R1's control fetch failed too), so the sample counts for no one.
+    outcome: Literal["ok", "failed", "discarded"] = "ok"
     # The failed step and how it failed: "timeout" or "error".
     failed_step: str | None = None
     error_class: str | None = None
@@ -68,6 +69,8 @@ def write_manifest(run_dir: Path, run_id: str, providers: list[str], metrics: li
         "methodology": methodology.VERSION,
         "spec": {"cpu": methodology.CPU, "memory_mb": methodology.MEMORY_MB, "region": methodology.REGION},
         "timeouts_s": {"create": methodology.CREATE_TIMEOUT_S, "step": methodology.STEP_TIMEOUT_S},
+        "cadence": {m: {"period_s": p, "samples": n} for m, (p, n) in methodology.CADENCE.items() if m in metrics},
+        "probe_url": methodology.PROBE_URL,
         "providers": providers,
         "metrics": metrics,
         "client": {"python": sys.version.split()[0], "platform": platform.platform()},
