@@ -24,7 +24,8 @@ docs describe.
 # Prototype: 20 S1 samples on modal_vm, back to back
 agent-env bench sandboxes --providers modal_vm --metrics S1 --samples 20 --out runs/modal_vm-s1
 
-# The scored cadence on every ranked provider for 7 days: S1 10 times an hour, an R1 probe every 5 minutes
+# The scored cadence on every ranked provider for 7 days: an S1 start every 6 minutes and an R1 probe every 5,
+# each moved by up to a sixth of its period so no two lock in step
 agent-env bench sandboxes --providers all --days 7 --out runs/week
 
 # Statistics with bootstrap 95% intervals

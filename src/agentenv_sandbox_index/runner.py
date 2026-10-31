@@ -192,7 +192,8 @@ async def run(
         period, count = methodology.CADENCE[metric]
         due = time.monotonic() + random.uniform(0, period)
         while due < end:
-            await asyncio.sleep(max(0.0, due - time.monotonic()))
+            jitter = random.uniform(-1, 1) * methodology.CADENCE_JITTER * period
+            await asyncio.sleep(max(0.0, due + jitter - time.monotonic()))
             for _ in range(count):
                 await measure(name, metric)
             due += period

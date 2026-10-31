@@ -107,7 +107,7 @@ def test_cli_run_then_score(tmp_path, monkeypatch):
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["spec"] == {"cpu": 2.0, "memory_mb": 4096, "region": "us-east"}
     assert manifest["distributions"]["agentenv-framework"]
-    assert manifest["cadence"] == {"S1": {"period_s": 3600, "samples": 10}, "R1": {"period_s": 300, "samples": 1}}
+    assert manifest["cadence"] == {"S1": {"period_s": 360, "samples": 1}, "R1": {"period_s": 300, "samples": 1}}
 
     result = CliRunner().invoke(cli.bench, ["score", str(out), "--resamples", "50", "--json"])
     assert result.exit_code == 0, result.output

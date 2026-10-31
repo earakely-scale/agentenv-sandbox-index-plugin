@@ -84,8 +84,11 @@ RELIABILITY_FLOOR = 99.0
 RELIABILITY_CAP = 40.0
 
 # How often each metric samples a provider in the scored run: (period in seconds, samples each period). Each
-# provider's loop for a metric starts at a random offset inside the first period.
-CADENCE: dict[str, tuple[float, int]] = {"S1": (3600, 10), "R1": (300, 1)}
+# provider's loop for a metric starts at a random offset inside the first period, and every later sample moves by up to
+# CADENCE_JITTER of a period either way. S1 is one isolated start every 6 minutes, not a back-to-back batch: a create
+# that follows another can be faster than one after a gap, so a batch measures mostly the warm path.
+CADENCE: dict[str, tuple[float, int]] = {"S1": (360, 1), "R1": (300, 1)}
+CADENCE_JITTER = 1 / 6
 
 # R1's network step fetches this from inside the sandbox; the client fetches it too, at the same moment, so a fault on
 # the client's side discards the probe instead of failing the provider. A tiny response on a CDN built for checks.
