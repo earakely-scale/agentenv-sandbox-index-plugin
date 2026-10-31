@@ -66,5 +66,7 @@ def score(runs: tuple[Path, ...], resamples: int, as_json: bool):
         )
         return
     for s in summaries:
-        stats = "  ".join(f"{x.name} {x.value:.3f} s [{x.lo:.3f}, {x.hi:.3f}]" for x in s.statistics)
+        stats = "  ".join(
+            f"{x.name} {x.value:.3f} s [{x.lo:.3f}, {x.hi:.3f}] by {x.resampled_by}" for x in s.statistics
+        )
         click.echo(f"{s.provider:<12} {s.metric}  n={s.samples} failed={s.failed}  {stats}")

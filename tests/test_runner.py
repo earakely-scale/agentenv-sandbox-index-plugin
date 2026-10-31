@@ -113,6 +113,29 @@ def test_unmeasured_metric_is_refused(tmp_path):
     assert result.exit_code != 0 and "not measured yet: R1" in result.output
 
 
+def _row(hour: int, value: float) -> runner.Row:
+    return runner.Row(
+        run_id="r",
+        sample_id=f"{hour}-{value}",
+        provider="p",
+        metric="S1",
+        started_at=f"2026-10-31T{hour:02d}:00:00",
+        value=value,
+    )
+
+
+def test_one_hour_resamples_by_sample_not_a_zero_width_block():
+    (s,) = summarize([_row(1, v) for v in (0.6, 0.7, 0.8, 0.9, 1.5)], resamples=500)
+    p50 = s.statistics[0]
+    assert (p50.resampled_by, p50.blocks) == ("sample", 5)
+    assert p50.lo < p50.value < p50.hi
+
+
+def test_several_hours_resample_by_hour():
+    (s,) = summarize([_row(h, v) for h in (1, 2, 3) for v in (0.6, 0.7 + h / 10)], resamples=500)
+    assert (s.statistics[0].resampled_by, s.statistics[0].blocks) == ("hour", 3)
+
+
 def test_summary_interval_contains_the_value():
     provider = FakeVmProvider()
     rows = [s1(provider) for _ in range(20)]
